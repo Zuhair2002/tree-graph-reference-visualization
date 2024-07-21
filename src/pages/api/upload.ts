@@ -1,7 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import formidable from "formidable";
 import fs from "fs/promises";
-import path from "path";
 import {
   parseInterfaces,
   transformToGraphData,
@@ -19,17 +18,8 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  const uploadDir = path.join(process.cwd(), "uploads");
-  try {
-    await fs.mkdir(uploadDir, { recursive: true });
-  } catch (err) {
-    console.error("Error creating upload directory", err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-
   const form = formidable({
     multiples: false,
-    uploadDir: uploadDir,
     keepExtensions: true,
   });
 
@@ -45,28 +35,23 @@ export default async function handler(
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const filePath = file.filepath;
-
     try {
-      const fileContent = await fs.readFile(filePath, "utf-8");
-      const references = parseInterfaces(fileContent);
+      // Read the file content directly from the uploaded file
+      const fileContent = await fs.readFile(file.filepath, "utf-8");
 
+      // Process the file content
+      const references = parseInterfaces(fileContent);
       const treeData = transformToTreeData(references);
       const graphData = transformToGraphData(references);
 
+      // Prepare the response
       const encodedData = CircularJSON.stringify({ treeData, graphData });
 
       res.setHeader("Content-Type", "application/json");
       res.status(200).send(encodedData);
     } catch (readErr) {
       console.error("Error reading the file", readErr);
-      res.status(500).json({ error: "Error reading the file" });
-    } finally {
-      try {
-        await fs.unlink(filePath);
-      } catch (unlinkErr) {
-        console.error("Error deleting the file", unlinkErr);
-      }
+      res.status(500).json({ error: "Error processing the file" });
     }
   });
 }

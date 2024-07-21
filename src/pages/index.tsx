@@ -36,6 +36,10 @@ const HomePage = () => {
         "treeData",
         CircularJSON.stringify(decodedData.treeData)
       );
+
+      alert(
+        "File uploaded successfully! You can now view the data. Click 'View Graph' or 'View Tree' to proceed."
+      );
     } else {
       alert("File upload failed.");
     }

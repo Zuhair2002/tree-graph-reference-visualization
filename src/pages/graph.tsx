@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
+import styles from "./GraphPage.module.css";
 
 const GraphPage = () => {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const simulationRef = useRef<d3.Simulation<any, any> | null>(null);
-  const [highlightedNodes, setHighlightedNodes] = useState<Set<string>>(
-    new Set()
-  );
-  let graphData: any = {};
+  const [selectedRootNode, setSelectedRootNode] = useState<string | null>(null);
+  const [graphData, setGraphData] = useState<any>(null);
+  const [filteredGraphData, setFilteredGraphData] = useState<any>(null);
 
   useEffect(() => {
     const storedGraphData = localStorage.getItem("graphData");
@@ -16,148 +16,171 @@ const GraphPage = () => {
       return;
     }
 
-    graphData = JSON.parse(storedGraphData);
+    const parsedGraphData = JSON.parse(storedGraphData);
+    setGraphData(parsedGraphData);
+  }, []);
 
-    const targetNodes = new Set(
-      graphData.links.map((link: any) => link.target)
-    );
+  useEffect(() => {
+    if (graphData) {
+      if (selectedRootNode) {
+        const nodesToHighlight = new Set<string>();
+        const linksToHighlight = new Set<any>();
 
-    const rootNodes = new Set(
-      graphData.nodes
-        .filter((node: any) => !targetNodes.has(node.id))
-        .map((node: any) => node.id)
-    );
+        // Function to gather all nodes and links in the subtree
+        const gatherSubtree = (nodeId: string) => {
+          nodesToHighlight.add(nodeId);
 
-    const nodesWithType = graphData.nodes.map((node: any) => ({
-      ...node,
-      type: rootNodes.has(node.id) ? "root" : "non-root",
-    }));
+          graphData.links.forEach((link: any) => {
+            if (link.source.id === nodeId) {
+              if (!nodesToHighlight.has(link.target.id)) {
+                nodesToHighlight.add(link.target.id);
+              }
+              linksToHighlight.add(link);
+              gatherSubtree(link.target.id);
+            }
+          });
+        };
 
-    if (svgRef.current) {
-      const svg = d3
-        .select(svgRef.current)
-        .attr("width", window.innerWidth)
-        .attr("height", window.innerHeight)
-        .style("border", "1px solid #ccc")
-        .style("background-color", "#f9f9f9");
+        gatherSubtree(selectedRootNode);
 
-      const container = svg.append("g");
-
-      const zoom = d3
-        .zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.1, 2])
-        .on("zoom", (event) => {
-          container.attr("transform", event.transform);
-        });
-
-      svg.call(zoom);
-
-      // Set initial zoom level to 0.75
-      svg.call(zoom.transform, d3.zoomIdentity.scale(0.6));
-
-      const simulation = d3
-        .forceSimulation(nodesWithType)
-        .force(
-          "link",
-          d3
-            .forceLink(graphData.links)
-            .id((d: any) => d.id)
-            .distance(200)
-        )
-        .force("charge", d3.forceManyBody().strength(-1000)) // Decrease strength for more spacing
-        .force(
-          "center",
-          d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2)
-        )
-        .force("collision", d3.forceCollide().radius(40)) // Increase collision radius
-        .force("x", d3.forceX(window.innerWidth / 2).strength(0.1))
-        .force("y", d3.forceY(window.innerHeight / 2).strength(0.1));
-
-      simulationRef.current = simulation;
-
-      const link = container
-        .append("g")
-        .selectAll("path")
-        .data(graphData.links)
-        .enter()
-        .append("path")
-        .attr("fill", "none")
-        .attr("stroke", "#999")
-        .attr("stroke-width", "2px")
-        .attr("stroke-opacity", "0.6");
-
-      const node = container
-        .append("g")
-        .selectAll("circle")
-        .data(nodesWithType)
-        .enter()
-        .append("circle")
-        .attr("r", 20) // Optimize node size
-        .attr("fill", (d: any) => (d.type === "root" ? "#ff6347" : "#1f77b4"))
-        .attr("stroke", "#fff")
-        .attr("stroke-width", "3px")
-        .on("mouseover", function () {
-          d3.select(this).transition().duration(300).attr("r", 25);
-        })
-        .on("mouseout", function () {
-          d3.select(this).transition().duration(300).attr("r", 20);
-        })
-        .call(
-          d3
-            .drag<SVGCircleElement, any>()
-            .on("start", dragstarted)
-            .on("drag", dragged)
-            .on("end", dragended)
-        )
-        .on("click", (event, d: any) => {
-          if (d.type === "root") {
-            highlightNodeAndChildren(d.id);
-          } else {
-            setHighlightedNodes(new Set());
-          }
-        });
-
-      const labels = container
-        .append("g")
-        .selectAll("text")
-        .data(nodesWithType)
-        .enter()
-        .append("text")
-        .attr("text-anchor", "middle")
-        .attr("font-size", "14px")
-        .attr("fill", "#333")
-        .attr("font-family", "Arial")
-        .attr("pointer-events", "none")
-        .text((d: any) => d.id);
-
-      simulation.on("tick", () => {
-        link.attr(
-          "d",
-          (d: any) => `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`
+        const nodesToShow = graphData.nodes.filter((node: any) =>
+          nodesToHighlight.has(node.id)
+        );
+        const linksToShow = graphData.links.filter((link: any) =>
+          linksToHighlight.has(link)
         );
 
-        node.attr("cx", (d: any) => d.x).attr("cy", (d: any) => d.y);
+        setFilteredGraphData({ nodes: nodesToShow, links: linksToShow });
+      } else {
+        setFilteredGraphData(graphData);
+      }
+    }
+  }, [graphData, selectedRootNode]);
 
-        labels.attr("x", (d: any) => d.x).attr("y", (d: any) => d.y + 5);
+  useEffect(() => {
+    if (!filteredGraphData || !svgRef.current) return;
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    const width = window.innerWidth - 200;
+    const height = window.innerHeight;
+
+    svg
+      .attr("width", width)
+      .attr("height", height)
+      .style("border", "1px solid #ccc")
+      .style("background-color", "#f9f9f9");
+
+    const container = svg.append("g");
+
+    const zoom = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.1, 2])
+      .on("zoom", (event) => {
+        container.attr("transform", event.transform);
       });
 
-      const handleResize = () => {
-        svg.attr("width", window.innerWidth).attr("height", window.innerHeight);
-        simulation.force(
-          "center",
-          d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2)
-        );
-        simulation.alpha(1).restart();
-      };
+    svg.call(zoom);
 
-      window.addEventListener("resize", handleResize);
+    const simulation = d3
+      .forceSimulation(filteredGraphData.nodes)
+      .force(
+        "link",
+        d3
+          .forceLink(filteredGraphData.links)
+          .id((d: any) => d.id)
+          .distance(200)
+      )
+      .force("charge", d3.forceManyBody().strength(-1000))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(40))
+      .force("x", d3.forceX(width / 2).strength(0.1))
+      .force("y", d3.forceY(height / 2).strength(0.1));
 
-      return () => {
-        window.removeEventListener("resize", handleResize);
-        simulation.stop();
-      };
-    }
-  }, []);
+    simulationRef.current = simulation;
+
+    const link = container
+      .append("g")
+      .selectAll("path")
+      .data(filteredGraphData.links)
+      .enter()
+      .append("path")
+      .attr("fill", "none")
+      .attr("stroke", "#999")
+      .attr("stroke-width", "2px")
+      .attr("stroke-opacity", "0.6");
+
+    const node = container
+      .append("g")
+      .selectAll("circle")
+      .data(filteredGraphData.nodes)
+      .enter()
+      .append("circle")
+      .attr("r", 20)
+      .attr("fill", (d: any) => {
+        if (d.id === selectedRootNode) return "#ff6347";
+        if (
+          graphData.links.some(
+            (link: any) => link.source.id === d.id || link.target.id === d.id
+          )
+        )
+          return "#ffd700";
+        return "#1f77b4";
+      })
+      .attr("stroke", "#fff")
+      .attr("stroke-width", "3px")
+      .on("mouseover", function () {
+        d3.select(this).transition().duration(300).attr("r", 25);
+      })
+      .on("mouseout", function () {
+        d3.select(this).transition().duration(300).attr("r", 20);
+      })
+      .call(
+        d3
+          .drag<SVGCircleElement, any>()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended)
+      );
+
+    const labels = container
+      .append("g")
+      .selectAll("text")
+      .data(filteredGraphData.nodes)
+      .enter()
+      .append("text")
+      .attr("text-anchor", "middle")
+      .attr("font-size", "14px")
+      .attr("fill", "#333")
+      .attr("font-family", "Arial")
+      .attr("pointer-events", "none")
+      .text((d: any) => d.id);
+
+    simulation.on("tick", () => {
+      link.attr(
+        "d",
+        (d: any) => `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`
+      );
+      node.attr("cx", (d: any) => d.x).attr("cy", (d: any) => d.y);
+      labels.attr("x", (d: any) => d.x).attr("y", (d: any) => d.y + 5);
+    });
+
+    const handleResize = () => {
+      svg
+        .attr("width", window.innerWidth - 200)
+        .attr("height", window.innerHeight);
+      simulation.force("center", d3.forceCenter(width / 2, height / 2));
+      simulation.alpha(1).restart();
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      simulation.stop();
+    };
+  }, [filteredGraphData]);
 
   function dragstarted(
     event: d3.D3DragEvent<SVGCircleElement, any, any>,
@@ -191,68 +214,31 @@ const GraphPage = () => {
     d.fy = null;
   }
 
-  function highlightNodeAndChildren(rootId: string) {
-    const nodesToHighlight = new Set<string>();
-    const linksToHighlight = new Set<string>(); // Track links to highlight
-    nodesToHighlight.add(rootId);
-
-    graphData.links.forEach((link: any) => {
-      if (link.source.id === rootId || nodesToHighlight.has(link.source.id)) {
-        nodesToHighlight.add(link.target.id);
-        linksToHighlight.add(`${link.source.id}-${link.target.id}`); // Add link to highlight
-      }
-    });
-
-    setHighlightedNodes(nodesToHighlight);
-
-    // Update link color
-    d3.select(svgRef.current)
-      .selectAll("path")
-      .attr("stroke", (d: any) =>
-        linksToHighlight.has(`${d.source.id}-${d.target.id}`)
-          ? "#000000"
-          : "#999"
-      );
-  }
-
-  useEffect(() => {
-    if (svgRef.current) {
-      const svg = d3.select(svgRef.current);
-
-      svg
-        .selectAll("circle")
-        .attr("opacity", (d: any) =>
-          highlightedNodes.size === 0 || highlightedNodes.has(d.id) ? 1 : 0.1
-        );
-
-      svg
-        .selectAll("path")
-        .attr("opacity", (d: any) =>
-          highlightedNodes.size === 0 ||
-          (highlightedNodes.has(d.source.id) &&
-            highlightedNodes.has(d.target.id))
-            ? 1
-            : 0.1
-        );
-
-      svg
-        .selectAll("text")
-        .attr("opacity", (d: any) =>
-          highlightedNodes.size === 0 || highlightedNodes.has(d.id) ? 1 : 0.1
-        )
-        .attr("font-size", (d: any) =>
-          highlightedNodes.size === 0 || highlightedNodes.has(d.id)
-            ? d.type === "root"
-              ? "18px"
-              : "18px"
-            : "18px"
-        );
-    }
-  }, [highlightedNodes]);
+  const handleNodeClick = (nodeId: string) => {
+    setSelectedRootNode(nodeId);
+  };
 
   return (
-    <div>
-      <svg ref={svgRef}></svg>
+    <div className={styles.container}>
+      <div className={styles.sidebar}>
+        <ul>
+          {graphData &&
+            graphData.nodes.map((node: any) => (
+              <li
+                key={node.id}
+                onClick={() => handleNodeClick(node.id)}
+                className={
+                  node.id === selectedRootNode ? styles.selectedNode : ""
+                }
+              >
+                {node.id}
+              </li>
+            ))}
+        </ul>
+      </div>
+      <div className={styles.graphContainer}>
+        <svg ref={svgRef}></svg>
+      </div>
     </div>
   );
 };
